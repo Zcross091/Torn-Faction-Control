@@ -1,5 +1,4 @@
 import os
-import re
 import json
 import time
 import discord
@@ -8,12 +7,16 @@ import asyncio
 import csv
 from discord.ext import commands
 from discord import app_commands
+import aiohttp
+from aiohttp import web
 
 # ====== Setup ======
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 TORN_API_KEY = "etqdem2Fp1VlhfGB"
-GUILD_ID_INT = 1352710920660582471
-GUILD_ID = discord.Object(id=GUILD_ID_INT)
+GUILD_ID = 1352710920660582471  # Use raw int
+
+if not TOKEN:
+    raise ValueError("DISCORD_BOT_TOKEN is not set in environment variables.")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -23,17 +26,6 @@ tree = bot.tree
 
 TRACK_FOLDER = "tracked"
 os.makedirs(TRACK_FOLDER, exist_ok=True)
-
-# ====== Slash Command Sync ======
-@bot.event
-async def on_ready():
-    try:
-        await tree.sync()  # Ensure global sync (optional)
-        await tree.copy_global_to(guild=GUILD_ID)
-        await tree.sync(guild=GUILD_ID)
-        print(f"✅ Slash commands synced to test server: {GUILD_ID_INT}")
-    except Exception as e:
-        print(f"❌ Failed to sync commands: {e}")
 
 # ====== Torn API (cached) ======
 CACHE = {}
@@ -56,8 +48,18 @@ def fetch_user_cached(username, api_key):
     CACHE[username] = { 'ts': now, 'data': data }
     return data
 
-# ====== /help ======
-@tree.command(name="help", description="Show all commands and usage")
+# ====== Slash Command Sync ======
+@bot.event
+async def on_ready():
+    await bot.wait_until_ready()
+    try:
+        await tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Slash commands synced to test server: {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
+
+# ====== Commands ======
+@tree.command(name="help", description="Show all commands and usage", guild=discord.Object(id=GUILD_ID))
 async def help_command(interaction: discord.Interaction):
     msg = (
         "\U0001F4D6 **Bot Command Help**\n\n"
@@ -71,8 +73,7 @@ async def help_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(msg, ephemeral=True)
 
-# ====== /status ======
-@tree.command(name="status", description="Check bot responsiveness")
+@tree.command(name="status", description="Check bot responsiveness", guild=discord.Object(id=GUILD_ID))
 async def status(interaction: discord.Interaction):
     start = time.time()
     await interaction.response.defer(ephemeral=True)
@@ -80,13 +81,11 @@ async def status(interaction: discord.Interaction):
     latency = (time.time() - start) * 1000
     await interaction.followup.send(f"✅ Bot is responsive! Ping: `{latency:.2f}ms`", ephemeral=True)
 
-# ====== /track Command ======
-@tree.command(name="track", description="Track progress of players over time")
+@tree.command(name="track", description="Track progress of players", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(names="One or more Torn usernames separated by space")
 async def track(interaction: discord.Interaction, names: str):
     await interaction.response.defer(ephemeral=True)
     reports = []
-
     for name in names.split():
         data = fetch_user_cached(name, TORN_API_KEY)
         if not data:
@@ -105,14 +104,12 @@ async def track(interaction: discord.Interaction, names: str):
         }
 
         file_path = os.path.join(TRACK_FOLDER, f"{name.lower()}.json")
-
         if os.path.exists(file_path):
             with open(file_path, "r") as f:
                 old = json.load(f)
 
             dt = int(time.time()) - old["timestamp"]
             age = f"{dt // 3600}h ago" if dt < 86400 else f"{dt // 86400}d ago"
-
             diff = {
                 "stats": profile["total_stats"] - old["total_stats"],
                 "cash": profile["money_earned"] - old["money_earned"],
@@ -123,14 +120,14 @@ async def track(interaction: discord.Interaction, names: str):
             }
 
             msg = (
-                f"📈 **{name}** ({age}):\n"
-                f"• Stats: +{diff['stats'] / 1_000_000:.1f}M\n"
-                f"• Net Worth: +${diff['worth']:,}\n"
-                f"• Cash Earned: +${diff['cash']:,}\n"
-                f"• Drugs: +{diff['drugs']}, Refills: +{diff['refills']}, Revives: +{diff['revives']}"
+                f"\ud83d\udcc8 **{name}** ({age}):\n"
+                f"\u2022 Stats: +{diff['stats'] / 1_000_000:.1f}M\n"
+                f"\u2022 Net Worth: +${diff['worth']:,}\n"
+                f"\u2022 Cash Earned: +${diff['cash']:,}\n"
+                f"\u2022 Drugs: +{diff['drugs']}, Refills: +{diff['refills']}, Revives: +{diff['revives']}"
             )
         else:
-            msg = f"📌 First snapshot saved for `{name}`. Use `/track {name}` later to see progress."
+            msg = f"\ud83d\udd1c First snapshot saved for `{name}`. Use `/track {name}` later to see progress."
 
         with open(file_path, "w") as f:
             json.dump(profile, f, indent=2)
@@ -139,8 +136,7 @@ async def track(interaction: discord.Interaction, names: str):
 
     await interaction.followup.send("\n\n".join(reports), ephemeral=True)
 
-# ====== /trackrole Command ======
-@tree.command(name="trackrole", description="Track all users in a Discord role")
+@tree.command(name="trackrole", description="Track all users in a Discord role", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(role="Discord role to track")
 async def track_role(interaction: discord.Interaction, role: discord.Role):
     await interaction.response.defer(ephemeral=True)
@@ -150,19 +146,17 @@ async def track_role(interaction: discord.Interaction, role: discord.Role):
         return
     await track(interaction, " ".join(members))
 
-# ====== /cleartrack Command ======
-@tree.command(name="cleartrack", description="Clear stored snapshot for a player")
+@tree.command(name="cleartrack", description="Clear snapshot for a player", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(name="Torn username")
 async def cleartrack(interaction: discord.Interaction, name: str):
     file_path = os.path.join(TRACK_FOLDER, f"{name.lower()}.json")
     if os.path.exists(file_path):
         os.remove(file_path)
-        await interaction.response.send_message(f"🗑️ Snapshot for `{name}` deleted.", ephemeral=True)
+        await interaction.response.send_message(f"\ud83d\uddd1️ Snapshot for `{name}` deleted.", ephemeral=True)
     else:
         await interaction.response.send_message(f"⚠️ No snapshot found for `{name}`.", ephemeral=True)
 
-# ====== /exporttrack Command ======
-@tree.command(name="exporttrack", description="Export all tracked data to CSV")
+@tree.command(name="exporttrack", description="Export all tracked data to CSV", guild=discord.Object(id=GUILD_ID))
 async def exporttrack(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     rows = []
@@ -193,28 +187,22 @@ async def exporttrack(interaction: discord.Interaction):
 
     await interaction.followup.send(file=discord.File(csv_file), ephemeral=True)
 
-# ====== /topgrowth Command ======
-@tree.command(name="topgrowth", description="Show top growing players from tracked data")
+@tree.command(name="topgrowth", description="Top growing players", guild=discord.Object(id=GUILD_ID))
 async def topgrowth(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     growths = []
-
     for filename in os.listdir(TRACK_FOLDER):
-        path = os.path.join(TRACK_FOLDER, filename)
-        with open(path, "r") as f:
+        with open(os.path.join(TRACK_FOLDER, filename)) as f:
             data = json.load(f)
-        name = filename[:-5]
-        total = data["total_stats"]
-        growths.append((name, total))
+        growths.append((filename[:-5], data["total_stats"]))
 
     top = sorted(growths, key=lambda x: x[1], reverse=True)[:10]
-    msg = "🏆 **Top Growth**\n\n" + "\n".join([f"`{i+1}.` {name} — {stats / 1_000_000:.1f}M" for i, (name, stats) in enumerate(top)])
+    msg = "\ud83c\udfc6 **Top Growth**\n\n" + "\n".join([
+        f"`{i+1}.` {name} — {stats / 1_000_000:.1f}M" for i, (name, stats) in enumerate(top)
+    ])
     await interaction.followup.send(msg, ephemeral=True)
 
-# ====== Keep alive server (Render Web Services workaround) ======
-import aiohttp
-from aiohttp import web
-
+# ====== Keep Alive Server ======
 async def handle(request):
     return web.Response(text="Bot is running!")
 
@@ -223,12 +211,16 @@ async def start_webserver():
     app.add_routes([web.get("/", handle)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT"))  # Must exist on Render
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# ====== Run web + bot ======
+# ====== Run ======
 async def start_all():
     await start_webserver()
-    await bot.start(TOKEN)
+    try:
+        await bot.start(TOKEN)
+    except Exception as e:
+        print(f"Bot failed to start: {e}")
 
 asyncio.run(start_all())
