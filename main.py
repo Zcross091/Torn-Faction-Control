@@ -6,7 +6,7 @@ import discord
 import requests
 import asyncio
 import csv
-from discord.ext import commands, tasks
+from discord.ext import commands
 from discord import app_commands
 
 # ====== Setup ======
@@ -130,6 +130,82 @@ async def track(interaction: discord.Interaction, names: str):
     await interaction.followup.send("\n\n".join(reports), ephemeral=True)
 
 
+# ====== /trackrole Command ======
+@tree.command(name="trackrole", description="Track all users in a Discord role")
+@app_commands.describe(role="Discord role to track")
+async def track_role(interaction: discord.Interaction, role: discord.Role):
+    await interaction.response.defer(ephemeral=True)
+    members = [member.display_name for member in role.members if not member.bot]
+    if not members:
+        await interaction.followup.send("❌ No members found in that role.", ephemeral=True)
+        return
+    await track(interaction, " ".join(members))
+
+
+# ====== /cleartrack Command ======
+@tree.command(name="cleartrack", description="Clear stored snapshot for a player")
+@app_commands.describe(name="Torn username")
+async def cleartrack(interaction: discord.Interaction, name: str):
+    file_path = os.path.join(TRACK_FOLDER, f"{name.lower()}.json")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        await interaction.response.send_message(f"🗑️ Snapshot for `{name}` deleted.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"⚠️ No snapshot found for `{name}`.", ephemeral=True)
+
+
+# ====== /exporttrack Command ======
+@tree.command(name="exporttrack", description="Export all tracked data to CSV")
+async def exporttrack(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    rows = []
+    for filename in os.listdir(TRACK_FOLDER):
+        if filename.endswith(".json"):
+            with open(os.path.join(TRACK_FOLDER, filename)) as f:
+                data = json.load(f)
+            rows.append({
+                "name": filename[:-5],
+                "level": data["level"],
+                "total_stats": data["total_stats"],
+                "money_earned": data["money_earned"],
+                "refills": data["refills"],
+                "drugs": data["drugs"],
+                "revives": data["revives"],
+                "net_worth": data["net_worth"]
+            })
+
+    if not rows:
+        await interaction.followup.send("⚠️ No tracked data found.", ephemeral=True)
+        return
+
+    csv_file = "export.csv"
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+    await interaction.followup.send(file=discord.File(csv_file), ephemeral=True)
+
+
+# ====== /topgrowth Command ======
+@tree.command(name="topgrowth", description="Show top growing players from tracked data")
+async def topgrowth(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    growths = []
+
+    for filename in os.listdir(TRACK_FOLDER):
+        path = os.path.join(TRACK_FOLDER, filename)
+        with open(path, "r") as f:
+            data = json.load(f)
+        name = filename[:-5]
+        total = data["total_stats"]
+        growths.append((name, total))
+
+    top = sorted(growths, key=lambda x: x[1], reverse=True)[:10]
+    msg = "🏆 **Top Growth**\n\n" + "\n".join([f"`{i+1}.` {name} — {stats / 1_000_000:.1f}M" for i, (name, stats) in enumerate(top)])
+    await interaction.followup.send(msg, ephemeral=True)
+
+
 # ====== Keep alive server (Render Web Services workaround) ======
 import aiohttp
 from aiohttp import web
@@ -150,4 +226,4 @@ async def start_all():
     await start_webserver()
     await bot.start(TOKEN)
 
-asyncio.run(start_all())
+asyncio.ru
