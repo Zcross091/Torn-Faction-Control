@@ -12,7 +12,8 @@ from discord import app_commands
 # ====== Setup ======
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 TORN_API_KEY = "etqdem2Fp1VlhfGB"
-GUILD_ID = discord.Object(id=1352710920660582471)  # Replace with your actual guild ID
+GUILD_ID_INT = 1352710920660582471
+GUILD_ID = discord.Object(id=GUILD_ID_INT)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,9 +28,10 @@ os.makedirs(TRACK_FOLDER, exist_ok=True)
 @bot.event
 async def on_ready():
     try:
-        # Faster sync if you're only using it in a dev server
+        await tree.sync()  # Ensure global sync (optional)
+        await tree.copy_global_to(guild=GUILD_ID)
         await tree.sync(guild=GUILD_ID)
-        print(f"✅ Slash commands synced to test server: {GUILD_ID.id}")
+        print(f"✅ Slash commands synced to test server: {GUILD_ID_INT}")
     except Exception as e:
         print(f"❌ Failed to sync commands: {e}")
 
