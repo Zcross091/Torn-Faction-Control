@@ -48,7 +48,7 @@ def fetch_user_cached(username, api_key):
 @tree.command(name="help", description="Show all commands and usage")
 async def help_command(interaction: discord.Interaction):
     msg = (
-        "📖 **Bot Command Help**\n\n"
+        "\U0001F4D6 **Bot Command Help**\n\n"
         "`/track [names]` — Track stat growth for one or more players.\n"
         "`/trackrole [role]` — Track all users in a Discord role.\n"
         "`/topgrowth` — See top stat gainers.\n"
@@ -130,5 +130,24 @@ async def track(interaction: discord.Interaction, names: str):
     await interaction.followup.send("\n\n".join(reports), ephemeral=True)
 
 
-# (rest of your bot continues here unchanged...)
+# ====== Keep alive server (Render Web Services workaround) ======
+import aiohttp
+from aiohttp import web
 
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_webserver():
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
+    await site.start()
+
+# ====== Run web + bot ======
+async def start_all():
+    await start_webserver()
+    await bot.start(TOKEN)
+
+asyncio.run(start_all())
