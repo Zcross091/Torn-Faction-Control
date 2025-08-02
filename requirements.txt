@@ -1,3 +1,3 @@
-discord.py>=2.5.2
-aiohttp
-requests
+discord.py>=2.3.2
+openai>=1.3.5
+python-dotenv>=1.0.0
